@@ -1,0 +1,60 @@
+// Taskora — نموذج الداتا الأساسي (المرحلة 0)
+// مصمّم وهو فاهم إن الكارت = Blueprint (بييجي في مرحلة 1) والمنظمات multi-tenant من اليوم الأول.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [pgvector(map: "vector")]
+}
+
+model User {
+  id           String       @id @default(uuid()) @db.Uuid
+  email        String       @unique
+  name         String
+  passwordHash String
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  memberships  Membership[]
+
+  @@map("users")
+}
+
+model Organization {
+  id          String       @id @default(uuid()) @db.Uuid
+  name        String
+  slug        String       @unique
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  memberships Membership[]
+
+  @@map("organizations")
+}
+
+/// عضوية المستخدم في منظمة + دوره. مستخدم واحد ممكن يكون في أكتر من منظمة.
+model Membership {
+  id             String       @id @default(uuid()) @db.Uuid
+  userId         String       @db.Uuid
+  organizationId String       @db.Uuid
+  role           OrgRole      @default(MEMBER)
+  createdAt      DateTime     @default(now())
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, organizationId])
+  @@index([organizationId])
+  @@map("memberships")
+}
+
+enum OrgRole {
+  OWNER
+  ADMIN
+  MEMBER
+  OPERATOR
+}

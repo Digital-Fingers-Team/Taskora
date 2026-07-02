@@ -1,0 +1,31 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: taskora_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: taskora
+      POSTGRES_PASSWORD: taskora
+      POSTGRES_DB: taskora
+    ports:
+      - "5432:5432"
+    volumes:
+      - taskora_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U taskora"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: taskora_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - taskora_redisdata:/data
+
+volumes:
+  taskora_pgdata:
+  taskora_redisdata:

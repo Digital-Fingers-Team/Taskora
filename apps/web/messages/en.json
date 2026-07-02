@@ -1,0 +1,33 @@
+{
+  "common": {
+    "appName": "Taskora",
+    "email": "Email",
+    "password": "Password",
+    "name": "Name",
+    "submit": "Submit",
+    "loading": "Loading...",
+    "logout": "Logout",
+    "language": "العربية"
+  },
+  "landing": {
+    "title": "An operating system for repetitive work",
+    "subtitle": "AI executes, a human expert reviews, and every execution feeds the platform.",
+    "login": "Log in",
+    "register": "Sign up"
+  },
+  "auth": {
+    "loginTitle": "Log in",
+    "registerTitle": "Create a new account",
+    "haveAccount": "Have an account? Log in",
+    "noAccount": "No account yet? Create one",
+    "error": "Something went wrong, try again"
+  },
+  "dashboard": {
+    "title": "Your organizations",
+    "createOrg": "Create organization",
+    "orgName": "Organization name",
+    "noOrgs": "No organizations yet. Create your first one.",
+    "role": "Role",
+    "members": "Members"
+  }
+}
