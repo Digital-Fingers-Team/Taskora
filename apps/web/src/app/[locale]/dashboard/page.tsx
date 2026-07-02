@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
-import { useRouter } from "@/i18n/routing";
+import { Link, useRouter } from "@/i18n/routing";
 import { api, clearToken, getToken } from "@/lib/api";
 
 type Org = { id: string; name: string; slug: string; role: string };
@@ -82,17 +82,19 @@ export default function DashboardPage() {
       ) : (
         <ul className="flex flex-col gap-3">
           {orgs.map((org) => (
-            <li
-              key={org.id}
-              className="flex items-center justify-between rounded-xl bg-white p-4 shadow-sm"
-            >
-              <div>
-                <p className="font-medium">{org.name}</p>
-                <p className="text-sm text-gray-500">@{org.slug}</p>
-              </div>
-              <span className="rounded-full bg-gray-100 px-3 py-1 text-xs font-medium">
-                {org.role}
-              </span>
+            <li key={org.id}>
+              <Link
+                href={`/dashboard/${org.id}`}
+                className="flex items-center justify-between rounded-xl bg-white p-4 shadow-sm hover:shadow-md"
+              >
+                <div>
+                  <p className="font-medium">{org.name}</p>
+                  <p className="text-sm text-gray-500">@{org.slug}</p>
+                </div>
+                <span className="rounded-full bg-gray-100 px-3 py-1 text-xs font-medium">
+                  {org.role}
+                </span>
+              </Link>
             </li>
           ))}
         </ul>

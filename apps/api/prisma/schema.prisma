@@ -2,7 +2,8 @@
 // مصمّم وهو فاهم إن الكارت = Blueprint (بييجي في مرحلة 1) والمنظمات multi-tenant من اليوم الأول.
 
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
 }
 
 datasource db {
@@ -19,7 +20,12 @@ model User {
   createdAt    DateTime     @default(now())
   updatedAt    DateTime     @updatedAt
 
-  memberships  Membership[]
+  memberships     Membership[]
+  createdCards    Card[]
+  requestedTasks  Task[]       @relation("TaskRequester")
+  operatedTasks   Task[]       @relation("TaskOperator")
+  notifications   Notification[]
+  auditLogs       AuditLog[]
 
   @@map("users")
 }
@@ -31,9 +37,25 @@ model Organization {
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
 
-  memberships Membership[]
+  plan SubscriptionTier @default(FREE)
+
+  memberships      Membership[]
+  cards            Card[]
+  tasks            Task[]
+  transactions     Transaction[]
+  apiKeys          ApiKey[]
+  webhookEndpoints WebhookEndpoint[]
+  auditLogs        AuditLog[]
+  notifications    Notification[]
+  credentials      Credential[]
 
   @@map("organizations")
+}
+
+enum SubscriptionTier {
+  FREE
+  PRO
+  BUSINESS
 }
 
 /// عضوية المستخدم في منظمة + دوره. مستخدم واحد ممكن يكون في أكتر من منظمة.
@@ -42,6 +64,8 @@ model Membership {
   userId         String       @db.Uuid
   organizationId String       @db.Uuid
   role           OrgRole      @default(MEMBER)
+  /// مستوى المنفّذ (المرحلة 9: Quality Gates) — بيترقّى باجتياز اختبارات التأهيل.
+  level          OperatorLevel @default(NOVICE)
   createdAt      DateTime     @default(now())
 
   user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -57,4 +81,475 @@ enum OrgRole {
   ADMIN
   MEMBER
   OPERATOR
+}
+
+/// الكارت كـ Blueprint (المرحلة 1) — Runtime Object قابل للتطوّر، مش خطوات نصّية.
+model Card {
+  id             String         @id @default(uuid()) @db.Uuid
+  organizationId String         @db.Uuid
+  createdById    String         @db.Uuid
+
+  // --- Metadata ---
+  title              String
+  vertical           String
+  description        String         @default("")
+  reasonForExecution String         @default("")
+  difficulty         CardDifficulty @default(BEGINNER)
+  estimatedMinutes   Int?
+  requiredSkills     Json           @default("[]")
+
+  // --- Inputs Schema: مصفوفة حقول مدخلات (اسم، نوع، إجباري/اختياري) ---
+  inputsSchema Json @default("[]")
+
+  // --- Steps / Workflow: مصفوفة عُقد typed، مش نص واحد، عشان تستوعب شرط/حلقة بعدين ---
+  steps Json
+
+  // --- Tools: أسماء/مراجع فقط دلوقتي، الـ Connectors الحقيقية في مرحلة 8 ---
+  tools Json @default("[]")
+
+  expectedOutput String @default("")
+  commonMistakes Json   @default("[]")
+
+  /// سعر تنفيذ المهمة للشركة. لو null، الكارت ده مجاني ومفيش Transaction بتتعمل.
+  priceAmount Decimal? @db.Decimal(10, 2)
+
+  // منفصلين لأن اللي بتقوله للـ AI غير اللي بتقوله للإنسان
+  aiInstructions    String @default("")
+  humanInstructions String @default("")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // --- المرحلة 9: السوق والجودة ---
+  visibility            CardVisibility @default(PRIVATE)
+  /// وقت أول ما الكارت بقى معروض في السوق (Marketplace/Premium).
+  listedAt              DateTime?
+  /// أقل مستوى منفّذ مطلوب عشان يتنفّذ الكارت ده (اختياري).
+  requiredOperatorLevel OperatorLevel?
+  qualificationTestId   String?        @db.Uuid
+
+  organization      Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdBy         User              @relation(fields: [createdById], references: [id])
+  qualificationTest QualificationTest? @relation(fields: [qualificationTestId], references: [id])
+  tasks             Task[]
+  versions          CardVersion[]
+  knowledge         KnowledgeSource[]
+  simulations       CardSimulation[]
+  purchases         CardPurchase[]
+
+  @@index([organizationId])
+  @@map("cards")
+}
+
+enum CardDifficulty {
+  BEGINNER
+  INTERMEDIATE
+  ADVANCED
+}
+
+/// تطوّر الكروت (المرحلة 6) — الـ Moat. جدول append-only لتاريخ كل كارت زي Git.
+/// كل نسخة snapshot كامل للـ Blueprint + سبب التغيير. الـ Card row مرآة لأحدث Published.
+model CardVersion {
+  id      String @id @default(uuid()) @db.Uuid
+  cardId  String @db.Uuid
+
+  /// رقم تسلسلي داخل الكارت الواحد (1, 2, 3, ...).
+  version Int
+  status  CardVersionStatus @default(DRAFT)
+
+  /// snapshot كامل لبنية الكارت في لحظة النسخة — عشان الـ rollback يرجّع كل حاجة.
+  snapshot Json
+
+  /// ليه النسخة دي اتعملت (خصوصًا لو الـ AI اقترحها من حلقة التعلّم).
+  changeReason  String  @default("")
+  /// ملخّص نقطي بالتغييرات.
+  changeSummary Json    @default("[]")
+  /// اتعملت من حلقة تعلّم الـ AI ولا يدوي.
+  createdByAi   Boolean @default(false)
+
+  createdAt   DateTime  @default(now())
+  publishedAt DateTime?
+
+  card  Card   @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  tasks Task[]
+
+  @@unique([cardId, version])
+  @@index([cardId])
+  @@map("card_versions")
+}
+
+enum CardVersionStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+/// دورة حياة المهمة (المرحلة 2). State machine صريح، مش string عشوائي.
+model Task {
+  id             String     @id @default(uuid()) @db.Uuid
+  cardId         String     @db.Uuid
+  /// النسخة المثبّتة (المرحلة 6): المهمة اتنفّذت على البنية دي بالظبط، حتى لو
+  /// الكارت اتطوّر بعدين. أساس مقاييس كل نسخة. اختياري للتوافق مع مهام ما قبل النسخ.
+  cardVersionId  String?    @db.Uuid
+  organizationId String     @db.Uuid
+  requestedById  String     @db.Uuid
+  operatorId     String?    @db.Uuid
+
+  status     TaskStatus @default(DRAFT)
+  inputs     Json       @default("{}")
+  output     Json?
+  rating     Int?
+  reviewNote String     @default("")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  card         Card           @relation(fields: [cardId], references: [id])
+  cardVersion  CardVersion?   @relation(fields: [cardVersionId], references: [id])
+  organization Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  requestedBy  User           @relation("TaskRequester", fields: [requestedById], references: [id])
+  operator     User?          @relation("TaskOperator", fields: [operatorId], references: [id])
+  executionLogs ExecutionLog[]
+  transaction   Transaction?
+  chatMessages  ChatMessage[]
+
+  @@index([organizationId])
+  @@index([cardId])
+  @@index([cardVersionId])
+  @@index([operatorId])
+  @@map("tasks")
+}
+
+enum TaskStatus {
+  DRAFT
+  ASSIGNED
+  IN_PROGRESS
+  IN_REVIEW
+  REVISION_REQUESTED
+  COMPLETED
+  REJECTED
+}
+
+/// سجل التنفيذ — أهم جدول للمستقبل. بيغذّي تعلّم الكروت في مرحلة 6.
+model ExecutionLog {
+  id      String @id @default(uuid()) @db.Uuid
+  taskId  String @db.Uuid
+
+  event   String
+  message String @default("")
+  meta    Json?
+
+  createdAt DateTime @default(now())
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([taskId])
+  @@map("execution_logs")
+}
+
+/// توزيع الفلوس على كل مهمة (المرحلة 3). بتتعمل تلقائيًا لما المهمة تتقبل ولها سعر.
+model Transaction {
+  id             String @id @default(uuid()) @db.Uuid
+  taskId         String @unique @db.Uuid
+  organizationId String @db.Uuid
+
+  amount         Decimal @db.Decimal(10, 2)
+  platformFee    Decimal @db.Decimal(10, 2)
+  operatorPayout Decimal @db.Decimal(10, 2)
+
+  status       TransactionStatus @default(PENDING)
+  payoutStatus PayoutStatus      @default(PENDING)
+  paidAt       DateTime?
+  payoutPaidAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  task         Task         @relation(fields: [taskId], references: [id])
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@map("transactions")
+}
+
+enum TransactionStatus {
+  PENDING
+  PAID
+}
+
+enum PayoutStatus {
+  PENDING
+  PAID
+}
+
+/// شات مساعد أثناء التنفيذ (المرحلة 5). سجل محادثة المنفّذ مع الـ AI جوّه المهمة.
+model ChatMessage {
+  id     String @id @default(uuid()) @db.Uuid
+  taskId String @db.Uuid
+
+  role    ChatRole
+  content String
+
+  createdAt DateTime @default(now())
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([taskId])
+  @@map("chat_messages")
+}
+
+enum ChatRole {
+  USER
+  ASSISTANT
+}
+
+// =====================================================================
+// المرحلة 7 — جاهزية B2B (Enterprise Readiness)
+// API عام موثّق + Webhooks + Audit Logs + نظام أحداث/إشعارات داخلي.
+// =====================================================================
+
+/// مفتاح API للتكامل البرمجي (Public API). بنخزّن الـ hash بس، مش المفتاح الخام.
+/// المفتاح الكامل بيتعرض مرة واحدة لحظة الإنشاء بس.
+model ApiKey {
+  id             String    @id @default(uuid()) @db.Uuid
+  organizationId String    @db.Uuid
+  name           String
+  /// أول جزء من المفتاح للعرض في الواجهة (tk_live_ab12…) — مش سرّي.
+  prefix         String
+  /// SHA-256 للمفتاح الكامل. البحث بيتم بيه.
+  hashedKey      String    @unique
+  createdById    String    @db.Uuid
+  lastUsedAt     DateTime?
+  revokedAt      DateTime?
+  createdAt      DateTime  @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@map("api_keys")
+}
+
+/// نقطة استقبال Webhook للمنظمة. النظام بيبعت POST موقّع بالأحداث المشترَك فيها.
+model WebhookEndpoint {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @db.Uuid
+  url            String
+  /// سرّ التوقيع (HMAC-SHA256) — الشركة بتتأكد بيه إن الطلب جاي مننا فعلًا.
+  secret         String
+  /// أنواع الأحداث المشترَك فيها. مصفوفة فاضية = كل الأحداث.
+  events         Json     @default("[]")
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  deliveries   WebhookDelivery[]
+
+  @@index([organizationId])
+  @@map("webhook_endpoints")
+}
+
+/// سجل محاولة تسليم Webhook — عشان التتبّع وإعادة المحاولة.
+model WebhookDelivery {
+  id         String                @id @default(uuid()) @db.Uuid
+  endpointId String                @db.Uuid
+  event      String
+  payload    Json
+  status     WebhookDeliveryStatus @default(PENDING)
+  statusCode Int?
+  error      String                @default("")
+  attempts   Int                   @default(0)
+  createdAt  DateTime              @default(now())
+
+  endpoint WebhookEndpoint @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+
+  @@index([endpointId])
+  @@map("webhook_deliveries")
+}
+
+enum WebhookDeliveryStatus {
+  PENDING
+  SUCCESS
+  FAILED
+}
+
+/// سجل تدقيق — مين غيّر إيه، إمتى، القيمة القديمة والجديدة. شرط أساسي لأي B2B جادة.
+model AuditLog {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @db.Uuid
+  /// الفاعل. nullable عشان الأحداث الآلية (النظام) أو لو المستخدم اتمسح.
+  actorId        String?  @db.Uuid
+  action         String
+  entityType     String
+  entityId       String
+  before         Json?
+  after          Json?
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  actor        User?        @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@map("audit_logs")
+}
+
+/// إشعار داخلي لمستخدم — بيتولّد من نظام الأحداث (Task Assigned, Review Needed…).
+model Notification {
+  id             String    @id @default(uuid()) @db.Uuid
+  organizationId String    @db.Uuid
+  userId         String    @db.Uuid
+  type           String
+  title          String
+  body           String    @default("")
+  data           Json?
+  readAt         DateTime?
+  createdAt      DateTime  @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([organizationId])
+  @@map("notifications")
+}
+
+/// بيانات اعتماد مشفّرة (المرحلة 8) — Secrets Manager. القيمة الخام ما بتتخزّنش أبدًا:
+/// `encrypted` بيحتوي payload AES-256-GCM (iv:tag:ciphertext مشفّر base64).
+model Credential {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @db.Uuid
+  createdById    String   @db.Uuid
+  name           String
+  /// المزوّد: google_sheets / slack / notion / hubspot / openai / generic.
+  provider       String
+  /// الحمولة المشفّرة (AES-256-GCM). لا يُفكّ إلا داخليًا لحظة تنفيذ connector.
+  encrypted      String
+  /// آخر 4 خانات من السرّ — للتعرّف من غير كشف القيمة.
+  hint           String   @default("")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@map("credentials")
+}
+
+/// مصدر معرفة مرتبط بكارت (المرحلة 8) — Link / Text / SOP. الـ AI بيعمل RAG عليه.
+model KnowledgeSource {
+  id          String   @id @default(uuid()) @db.Uuid
+  cardId      String   @db.Uuid
+  createdById String   @db.Uuid
+  /// LINK أو TEXT.
+  type        String
+  title       String
+  url         String?
+  content     String   @default("")
+  createdAt   DateTime @default(now())
+
+  card Card @relation(fields: [cardId], references: [id], onDelete: Cascade)
+
+  @@index([cardId])
+  @@map("knowledge_sources")
+}
+
+// =====================================================================
+// المرحلة 9 — السوق والجودة (Marketplace + Quality Gates)
+// صلاحيات الكروت، محاكاة قبل النشر، شراء من السوق، وبوابات جودة للمنفّذين.
+// =====================================================================
+
+enum CardVisibility {
+  PRIVATE
+  TEAM
+  ORGANIZATION
+  MARKETPLACE
+  PREMIUM
+}
+
+enum OperatorLevel {
+  NOVICE
+  VERIFIED
+  EXPERT
+}
+
+enum CardSimulationStatus {
+  PENDING
+  RUNNING
+  PASSED
+  FAILED
+}
+
+/// محاكاة كارت قبل النشر في السوق (المرحلة 9) — Run Simulation → Pass → Publish.
+/// مفيش محرّك تنفيذ حقيقي (تعمّدنا تجنّبه من مرحلة 1) — دي فحوصات بنيوية +
+/// AI dry-run بيتأكد إن الكارت متسق وقابل للتنفيذ فعليًا، مش شكليّة.
+model CardSimulation {
+  id            String   @id @default(uuid()) @db.Uuid
+  cardId        String   @db.Uuid
+  cardVersionId String?  @db.Uuid
+  status        CardSimulationStatus @default(PENDING)
+  testInputs    Json     @default("{}")
+  log           Json     @default("[]")
+  result        Json?
+  runById       String   @db.Uuid
+  createdAt     DateTime @default(now())
+  completedAt   DateTime?
+
+  card Card @relation(fields: [cardId], references: [id], onDelete: Cascade)
+
+  @@index([cardId])
+  @@map("card_simulations")
+}
+
+/// شراء/تفعيل كارت من السوق — بينسخ الكارت لمنظمة المشتري كنسخة خاصة جديدة.
+model CardPurchase {
+  id            String   @id @default(uuid()) @db.Uuid
+  cardId        String   @db.Uuid
+  buyerOrgId    String   @db.Uuid
+  buyerCardId   String   @db.Uuid
+  purchasedById String   @db.Uuid
+  amount        Decimal? @db.Decimal(10, 2)
+  createdAt     DateTime @default(now())
+
+  card Card @relation(fields: [cardId], references: [id], onDelete: Cascade)
+
+  @@index([cardId])
+  @@index([buyerOrgId])
+  @@map("card_purchases")
+}
+
+/// اختبار قبول لمنفّذ قبل الوصول لكروت محتاجة مستوى معيّن (Quality Gates).
+/// organizationId = null يعني اختبار منصّة-wide متاح لكل المنظمات.
+/// questions شكلها: { id: string, prompt: string, options: string[], correctIndex: number }[]
+/// (متحقّق منه بـ Zod في packages/shared، مش في Prisma).
+model QualificationTest {
+  id             String        @id @default(uuid()) @db.Uuid
+  organizationId String?       @db.Uuid
+  title          String
+  vertical       String
+  passingScore   Int           @default(70)
+  questions      Json
+  grantsLevel    OperatorLevel @default(VERIFIED)
+  createdAt      DateTime      @default(now())
+
+  attempts QualificationAttempt[]
+  cards    Card[]
+
+  @@index([organizationId])
+  @@map("qualification_tests")
+}
+
+model QualificationAttempt {
+  id        String   @id @default(uuid()) @db.Uuid
+  testId    String   @db.Uuid
+  userId    String   @db.Uuid
+  score     Int
+  passed    Boolean
+  answers   Json
+  createdAt DateTime @default(now())
+
+  test QualificationTest @relation(fields: [testId], references: [id], onDelete: Cascade)
+
+  @@index([testId])
+  @@index([userId])
+  @@map("qualification_attempts")
 }

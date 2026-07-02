@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { Link, useRouter } from "@/i18n/routing";
 import { api, setToken } from "@/lib/api";
-import { AuthCard, Field } from "../login/page";
+import { AuthCard, Field } from "@/components/auth-form";
 
 export default function RegisterPage() {
   const t = useTranslations();
