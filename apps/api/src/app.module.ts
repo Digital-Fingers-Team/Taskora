@@ -21,6 +21,8 @@ import { ConnectorsModule } from "./connectors/connectors.module";
 import { KnowledgeModule } from "./knowledge/knowledge.module";
 import { MarketplaceModule } from "./marketplace/marketplace.module";
 import { QualityModule } from "./quality/quality.module";
+import { AgentOrchestratorModule } from "./agent-orchestrator/agent-orchestrator.module";
+import { LearningEngineModule } from "./learning-engine/learning-engine.module";
 import { HealthController } from "./health.controller";
 
 @Module({
@@ -51,6 +53,8 @@ import { HealthController } from "./health.controller";
     KnowledgeModule,
     MarketplaceModule,
     QualityModule,
+    AgentOrchestratorModule,
+    LearningEngineModule,
   ],
   controllers: [HealthController],
 })

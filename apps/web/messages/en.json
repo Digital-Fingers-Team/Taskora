@@ -306,6 +306,21 @@
       "FAILED": "Failed"
     }
   },
+  "orchestration": {
+    "title": "Agent orchestration",
+    "subtitle": "Enable the Planner → Research → Execute → QA pipeline that prepares a draft before the operator reviews and submits.",
+    "enabled": "Enabled",
+    "disabled": "Disabled",
+    "run": "Run orchestration",
+    "running": "Running…",
+    "plan": "Plan",
+    "research": "Research",
+    "draft": "Draft",
+    "useDraft": "Use draft",
+    "qa": "QA check",
+    "qaPassed": "Consistent",
+    "qaFailed": "Needs a close look"
+  },
   "qualification": {
     "title": "Qualification",
     "subtitle": "Take qualification tests to unlock higher-level cards.",

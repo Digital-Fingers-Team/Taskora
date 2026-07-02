@@ -36,6 +36,7 @@ export default function CardDetailPage() {
   const [simulations, setSimulations] = useState<CardSimulationView[]>([]);
   const [simBusy, setSimBusy] = useState(false);
   const [visBusy, setVisBusy] = useState(false);
+  const [orchBusy, setOrchBusy] = useState(false);
 
   async function refreshSimulations() {
     try {
@@ -79,6 +80,20 @@ export default function CardDetailPage() {
       setError(err instanceof Error ? err.message : "error");
     } finally {
       setVisBusy(false);
+    }
+  }
+
+  async function onToggleOrchestration() {
+    if (!card) return;
+    setOrchBusy(true);
+    setError(null);
+    try {
+      const updated = await api.updateCardOrchestration(orgId, cardId, !card.orchestrationEnabled);
+      setCard(updated);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "error");
+    } finally {
+      setOrchBusy(false);
     }
   }
 
@@ -170,6 +185,23 @@ export default function CardDetailPage() {
             </select>
           </div>
           <p className="mt-2 text-xs text-gray-500">{t("cardVisibility.simulationRequired")}</p>
+        </Section>
+
+        <Section title={t("orchestration.title")}>
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-gray-600">{t("orchestration.subtitle")}</p>
+            <button
+              disabled={orchBusy}
+              onClick={onToggleOrchestration}
+              className={`rounded-full px-4 py-1.5 text-sm font-medium disabled:opacity-50 ${
+                card.orchestrationEnabled
+                  ? "bg-green-100 text-green-700"
+                  : "bg-gray-100 text-gray-600"
+              }`}
+            >
+              {card.orchestrationEnabled ? t("orchestration.enabled") : t("orchestration.disabled")}
+            </button>
+          </div>
         </Section>
 
         <Section title={t("simulations.title")}>

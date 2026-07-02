@@ -48,6 +48,7 @@ model Organization {
   auditLogs        AuditLog[]
   notifications    Notification[]
   credentials      Credential[]
+  learningEvents   LearningEvent[]
 
   @@map("organizations")
 }
@@ -127,6 +128,8 @@ model Card {
   /// أقل مستوى منفّذ مطلوب عشان يتنفّذ الكارت ده (اختياري).
   requiredOperatorLevel OperatorLevel?
   qualificationTestId   String?        @db.Uuid
+  /// تفعيل أوركسترا الوكلاء (المرحلة 10) — اختياري لكل كارت، الأدمن بس بيفعّله.
+  orchestrationEnabled  Boolean        @default(false)
 
   organization      Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   createdBy         User              @relation(fields: [createdById], references: [id])
@@ -212,6 +215,7 @@ model Task {
   executionLogs ExecutionLog[]
   transaction   Transaction?
   chatMessages  ChatMessage[]
+  agentRun      AgentRun?
 
   @@index([organizationId])
   @@index([cardId])
@@ -301,6 +305,81 @@ model ChatMessage {
 enum ChatRole {
   USER
   ASSISTANT
+}
+
+// =====================================================================
+// المرحلة 10 — تعدّد الوكلاء (Agent Orchestration)
+// Planner → Research → Execute → QA → مراجعة بشرية → تسليم + محرّك تعلّم مركزي.
+// =====================================================================
+
+/// أوركسترا الوكلاء (المرحلة 10): Planner → Research → Execute → QA → مراجعة بشرية → تسليم.
+/// دي مش state machine بديلة لـ Task — مسار مساعد بيجهّز مسودة، والمنفّذ برضه بيراجع
+/// ويرفع بالـ submit العادي (الحلقة البشرية متتلغيش، فقط بتتقصّر). كارت واحد = تشغيلة واحدة لكل مهمة.
+model AgentRun {
+  id     String @id @default(uuid()) @db.Uuid
+  taskId String @unique @db.Uuid
+
+  stage AgentStage @default(PLANNING)
+
+  plan        Json?
+  research    Json?
+  draftOutput Json?
+  qaPassed    Boolean?
+  qaNotes     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  task      Task            @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  stageLogs AgentStageLog[]
+
+  @@map("agent_runs")
+}
+
+enum AgentStage {
+  PLANNING
+  RESEARCHING
+  EXECUTING
+  QA
+  HUMAN_REVIEW
+  DELIVERED
+  FAILED
+}
+
+/// أثر كل مرحلة (append-only) — الوقود اللي بيغذّي محرّك التعلّم المركزي (فين الأوركسترا بتتلخبط).
+model AgentStageLog {
+  id         String     @id @default(uuid()) @db.Uuid
+  agentRunId String     @db.Uuid
+  stage      AgentStage
+  input      Json?
+  output     Json?
+  notes      String     @default("")
+  durationMs Int?
+  createdAt  DateTime   @default(now())
+
+  agentRun AgentRun @relation(fields: [agentRunId], references: [id], onDelete: Cascade)
+
+  @@index([agentRunId])
+  @@map("agent_stage_logs")
+}
+
+/// محرّك التعلّم المركزي (المرحلة 10): سجل append-only لقرارات آلية اتخدها المحرك
+/// (مثلاً: اقترح نسخة كارت جديدة بعد فشل أو بعد كل N تنفيذ). التحسين نفسه بيتسجّل
+/// في CardVersion زي العادة (المرحلة 6) — الجدول ده بس للتتبّع: ليه القرار اتاخد.
+model LearningEvent {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @db.Uuid
+  cardId         String?  @db.Uuid
+  trigger        String
+  action         String
+  details        Json?
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([cardId])
+  @@map("learning_events")
 }
 
 // =====================================================================

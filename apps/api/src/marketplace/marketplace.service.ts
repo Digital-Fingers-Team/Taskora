@@ -46,6 +46,7 @@ function cardToView(card: Card): CardView {
     visibility: card.visibility as CardView["visibility"],
     requiredOperatorLevel: card.requiredOperatorLevel as CardView["requiredOperatorLevel"],
     qualificationTestId: card.qualificationTestId,
+    orchestrationEnabled: card.orchestrationEnabled,
   };
 }
 

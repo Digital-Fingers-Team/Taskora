@@ -4,9 +4,17 @@ import { z } from "zod";
 import {
   createCardSchema,
   improvementSuggestionSchema,
+  agentPlanSchema,
+  agentResearchSchema,
+  agentDraftSchema,
+  agentQaSchema,
   type CreateCardInput,
   type CardBlueprint,
   type ImprovementSuggestion,
+  type AgentPlan,
+  type AgentResearch,
+  type AgentDraft,
+  type AgentQa,
 } from "@taskora/shared";
 
 const MODEL = "claude-sonnet-5";
@@ -184,6 +192,184 @@ export class AiService {
         `AI simulation result failed schema validation: ${JSON.stringify(parsed.error.issues)}`,
       );
       return { passed: false, notes: "رد الـ AI على المحاكاة مكانش بالشكل المطلوب." };
+    }
+    return parsed.data;
+  }
+
+  // --- أوركسترا الوكلاء (المرحلة 10): Planner → Research → Execute → QA ---
+  // 4 مراحل بس، عمدًا — أي agent إضافي = تكلفة + بطء + نقطة فشل.
+
+  async planExecution(
+    blueprint: CardBlueprint,
+    inputs: Record<string, unknown>,
+  ): Promise<AgentPlan> {
+    const client = this.getClient();
+    const system = `
+أنت "Planner" في أوركسترا وكلاء منصة Taskora. هتاخد بنية الكارت (Blueprint) والمدخلات
+اللي المستخدم دخّلها، وتحطّ خطة تنفيذ مختصرة قبل أي تنفيذ فعلي.
+رجّع JSON فقط (من غير أي نص تاني) بالشكل ده:
+{ "approach": string, "steps": string[] }
+`.trim();
+
+    const userContent = [
+      `بنية الكارت:\n${JSON.stringify(blueprint, null, 2)}`,
+      `مدخلات المهمة:\n${JSON.stringify(inputs, null, 2)}`,
+    ].join("\n\n");
+
+    const response = await client.messages.create({
+      model: MODEL,
+      max_tokens: 800,
+      system,
+      messages: [{ role: "user", content: userContent }],
+    });
+
+    const text = response.content.find((b) => b.type === "text")?.text ?? "{}";
+    let raw: unknown;
+    try {
+      raw = JSON.parse(text);
+    } catch {
+      this.logger.error(`Failed to parse AI plan: ${text}`);
+      throw new InternalServerErrorException("مقدرتش أفهم رد الـ Planner، جرّب تاني");
+    }
+
+    const parsed = agentPlanSchema.safeParse(raw);
+    if (!parsed.success) {
+      this.logger.error(`AI plan failed schema validation: ${JSON.stringify(parsed.error.issues)}`);
+      throw new InternalServerErrorException("رد الـ Planner مكانش مطابق للشكل المطلوب، جرّب تاني");
+    }
+    return parsed.data;
+  }
+
+  async researchExecution(
+    blueprint: CardBlueprint,
+    inputs: Record<string, unknown>,
+    plan: AgentPlan,
+    knowledgeContext: string,
+  ): Promise<AgentResearch> {
+    const client = this.getClient();
+    const system = `
+أنت "Researcher" في أوركسترا وكلاء منصة Taskora. هتجمع أي سياق/معلومات لازمة قبل
+التنفيذ من قاعدة المعرفة المرفقة (لو فيه) ومن بنية الكارت نفسه وخطة الـ Planner.
+لو مفيش قاعدة معرفة مرفقة، وضّح إن مفيش مصادر متاحة واستنتج من بنية الكارت بس.
+رجّع JSON فقط (من غير أي نص تاني) بالشكل ده:
+{ "findings": string }
+`.trim();
+
+    const userContent = [
+      `بنية الكارت:\n${JSON.stringify(blueprint, null, 2)}`,
+      `مدخلات المهمة:\n${JSON.stringify(inputs, null, 2)}`,
+      `خطة الـ Planner:\n${JSON.stringify(plan, null, 2)}`,
+      `سياق من قاعدة المعرفة:\n${knowledgeContext || "مفيش مصادر معرفة مرفقة للكارت ده."}`,
+    ].join("\n\n");
+
+    const response = await client.messages.create({
+      model: MODEL,
+      max_tokens: 800,
+      system,
+      messages: [{ role: "user", content: userContent }],
+    });
+
+    const text = response.content.find((b) => b.type === "text")?.text ?? "{}";
+    let raw: unknown;
+    try {
+      raw = JSON.parse(text);
+    } catch {
+      this.logger.error(`Failed to parse AI research: ${text}`);
+      throw new InternalServerErrorException("مقدرتش أفهم رد الـ Researcher، جرّب تاني");
+    }
+
+    const parsed = agentResearchSchema.safeParse(raw);
+    if (!parsed.success) {
+      this.logger.error(
+        `AI research failed schema validation: ${JSON.stringify(parsed.error.issues)}`,
+      );
+      throw new InternalServerErrorException("رد الـ Researcher مكانش مطابق للشكل المطلوب، جرّب تاني");
+    }
+    return parsed.data;
+  }
+
+  async executeDraft(
+    blueprint: CardBlueprint,
+    inputs: Record<string, unknown>,
+    plan: AgentPlan,
+    research: AgentResearch,
+  ): Promise<AgentDraft> {
+    const client = this.getClient();
+    const system = `
+أنت "Executor" في أوركسترا وكلاء منصة Taskora. بتنفّذ الجزء الميكانيكي (بحث/تجميع/صياغة)
+بناءً على خطة الـ Planner ونتائج الـ Researcher، وبتنتج مسودة output تتوافق مع
+expectedOutput بتاع الكارت. المسودة دي مش نهائية — الإنسان (المنفّذ) هيراجعها ويعدّلها
+قبل ما ترفع فعليًا.
+رجّع JSON فقط (من غير أي نص تاني) بالشكل ده:
+{ "output": { ... حسب expectedOutput بتاع الكارت ... }, "notes": string }
+`.trim();
+
+    const userContent = [
+      `بنية الكارت:\n${JSON.stringify(blueprint, null, 2)}`,
+      `مدخلات المهمة:\n${JSON.stringify(inputs, null, 2)}`,
+      `خطة الـ Planner:\n${JSON.stringify(plan, null, 2)}`,
+      `نتائج الـ Researcher:\n${JSON.stringify(research, null, 2)}`,
+    ].join("\n\n");
+
+    const response = await client.messages.create({
+      model: MODEL,
+      max_tokens: 1500,
+      system,
+      messages: [{ role: "user", content: userContent }],
+    });
+
+    const text = response.content.find((b) => b.type === "text")?.text ?? "{}";
+    let raw: unknown;
+    try {
+      raw = JSON.parse(text);
+    } catch {
+      this.logger.error(`Failed to parse AI draft: ${text}`);
+      throw new InternalServerErrorException("مقدرتش أفهم رد الـ Executor، جرّب تاني");
+    }
+
+    const parsed = agentDraftSchema.safeParse(raw);
+    if (!parsed.success) {
+      this.logger.error(`AI draft failed schema validation: ${JSON.stringify(parsed.error.issues)}`);
+      throw new InternalServerErrorException("رد الـ Executor مكانش مطابق للشكل المطلوب، جرّب تاني");
+    }
+    return parsed.data;
+  }
+
+  async qaReview(blueprint: CardBlueprint, draft: AgentDraft): Promise<AgentQa> {
+    const client = this.getClient();
+    const system = `
+أنت "QA" في أوركسترا وكلاء منصة Taskora. بتحكم هل المسودة دي متسقة مع تعليمات
+الكارت والمخرج المتوقّع قبل ما تتحوّل لمراجعة بشرية. حكمك ده إشارة للمنفّذ، مش
+بوابة تمنع المراجعة البشرية — المراجعة هتحصل في الحالتين.
+رجّع JSON فقط (من غير أي نص تاني) بالشكل ده:
+{ "passed": boolean, "notes": string }
+`.trim();
+
+    const userContent = [
+      `بنية الكارت:\n${JSON.stringify(blueprint, null, 2)}`,
+      `المسودة:\n${JSON.stringify(draft, null, 2)}`,
+    ].join("\n\n");
+
+    const response = await client.messages.create({
+      model: MODEL,
+      max_tokens: 500,
+      system,
+      messages: [{ role: "user", content: userContent }],
+    });
+
+    const text = response.content.find((b) => b.type === "text")?.text ?? "{}";
+    let raw: unknown;
+    try {
+      raw = JSON.parse(text);
+    } catch {
+      this.logger.error(`Failed to parse AI QA review: ${text}`);
+      throw new InternalServerErrorException("مقدرتش أفهم رد الـ QA، جرّب تاني");
+    }
+
+    const parsed = agentQaSchema.safeParse(raw);
+    if (!parsed.success) {
+      this.logger.error(`AI QA failed schema validation: ${JSON.stringify(parsed.error.issues)}`);
+      throw new InternalServerErrorException("رد الـ QA مكانش مطابق للشكل المطلوب، جرّب تاني");
     }
     return parsed.data;
   }

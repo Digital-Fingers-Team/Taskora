@@ -117,6 +117,8 @@ export const cardViewSchema = cardFieldsSchema.extend({
   visibility: cardVisibilitySchema,
   requiredOperatorLevel: operatorLevelSchema.nullable().optional(),
   qualificationTestId: z.string().uuid().nullable().optional(),
+  /** تفعيل أوركسترا الوكلاء (المرحلة 10) — اختياري لكل كارت، الأدمن بس بيفعّله. */
+  orchestrationEnabled: z.boolean(),
 });
 export type CardView = z.infer<typeof cardViewSchema>;
 
@@ -131,5 +133,6 @@ export const cardListItemSchema = cardViewSchema.pick({
   visibility: true,
   requiredOperatorLevel: true,
   qualificationTestId: true,
+  orchestrationEnabled: true,
 });
 export type CardListItem = z.infer<typeof cardListItemSchema>;

@@ -17,3 +17,4 @@ export * from "./connector";
 export * from "./knowledge";
 export * from "./marketplace";
 export * from "./quality";
+export * from "./agent-orchestrator";

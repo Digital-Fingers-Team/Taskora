@@ -14,10 +14,12 @@ import {
   updateCardSchema,
   updateCardVisibilitySchema,
   runCardSimulationSchema,
+  updateCardOrchestrationSchema,
   type CreateCardInput,
   type UpdateCardInput,
   type UpdateCardVisibilityInput,
   type RunCardSimulationInput,
+  type UpdateCardOrchestrationInput,
   type AuthUser,
 } from "@taskora/shared";
 import { CardSimulationsService } from "./card-simulations.service";
@@ -90,6 +92,19 @@ export class CardsController {
     @Body(new ZodValidationPipe(updateCardVisibilitySchema)) body: UpdateCardVisibilityInput,
   ) {
     return this.cards.updateVisibility(orgId, cardId, user.id, body);
+  }
+
+  // --- المرحلة 10 (تعدّد الوكلاء) ---
+
+  @RequireRole(OrgRole.Admin)
+  @Patch(":cardId/orchestration")
+  updateOrchestration(
+    @Param("orgId") orgId: string,
+    @Param("cardId") cardId: string,
+    @CurrentUser() user: AuthUser,
+    @Body(new ZodValidationPipe(updateCardOrchestrationSchema)) body: UpdateCardOrchestrationInput,
+  ) {
+    return this.cards.updateOrchestration(orgId, cardId, user.id, body);
   }
 
   @RequireRole(OrgRole.Member)

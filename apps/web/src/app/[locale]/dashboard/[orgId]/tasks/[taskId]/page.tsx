@@ -5,8 +5,8 @@ import { useParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Link, useRouter } from "@/i18n/routing";
 import { api, getToken } from "@/lib/api";
-import type { AuthUser, ChatMessageView, MemberView, TaskView } from "@taskora/shared";
-import { ChatRole, ReviewDecision, TaskStatus } from "@taskora/shared";
+import type { AgentRunView, AuthUser, CardView, ChatMessageView, MemberView, TaskView } from "@taskora/shared";
+import { AgentStage, ChatRole, ReviewDecision, TaskStatus } from "@taskora/shared";
 
 const STATUS_COLORS: Record<string, string> = {
   DRAFT: "bg-gray-100 text-gray-700",
@@ -52,6 +52,11 @@ export default function TaskDetailPage() {
   const [chatBusy, setChatBusy] = useState(false);
   const [chatError, setChatError] = useState<string | null>(null);
 
+  const [card, setCard] = useState<CardView | null>(null);
+  const [agentRun, setAgentRun] = useState<AgentRunView | null>(null);
+  const [agentBusy, setAgentBusy] = useState(false);
+  const [agentError, setAgentError] = useState<string | null>(null);
+
   async function refresh() {
     setLoading(true);
     try {
@@ -83,6 +88,31 @@ export default function TaskDetailPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orgId, taskId, task?.status]);
+
+  useEffect(() => {
+    if (!task?.cardId) return;
+    void api.getCard(orgId, task.cardId).then(setCard);
+    void api.getAgentRun(orgId, taskId).then(setAgentRun).catch(() => setAgentRun(null));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orgId, taskId, task?.cardId]);
+
+  async function onRunOrchestration() {
+    setAgentBusy(true);
+    setAgentError(null);
+    try {
+      const run = await api.runAgentOrchestration(orgId, taskId);
+      setAgentRun(run);
+    } catch (err) {
+      setAgentError(err instanceof Error ? err.message : "error");
+    } finally {
+      setAgentBusy(false);
+    }
+  }
+
+  function onUseDraft() {
+    if (!agentRun?.draftOutput) return;
+    setOutputText(JSON.stringify(agentRun.draftOutput.output, null, 2));
+  }
 
   async function sendChat() {
     if (!chatInput.trim()) return;
@@ -187,6 +217,82 @@ export default function TaskDetailPage() {
             </div>
           </Section>
         )}
+
+        {/* أوركسترا الوكلاء (المرحلة 10) — اختيارية، بس لو الكارت مفعّلها */}
+        {isOperator &&
+          card?.orchestrationEnabled &&
+          (task.status === TaskStatus.Assigned || task.status === TaskStatus.InProgress) && (
+            <Section title={t("orchestration.title")}>
+              <div className="flex flex-col gap-3">
+                {agentRun?.stage !== AgentStage.HumanReview && (
+                  <button
+                    disabled={agentBusy}
+                    onClick={onRunOrchestration}
+                    className="self-start rounded-lg bg-brand px-4 py-2 text-sm font-medium text-brand-fg disabled:opacity-50"
+                  >
+                    {agentBusy ? t("orchestration.running") : t("orchestration.run")}
+                  </button>
+                )}
+                {agentError && <p className="text-sm text-red-600">{agentError}</p>}
+
+                {agentRun && (
+                  <div className="flex flex-col gap-3 text-sm">
+                    {agentRun.plan && (
+                      <div>
+                        <p className="font-medium">{t("orchestration.plan")}</p>
+                        <p className="text-gray-600">{agentRun.plan.approach}</p>
+                        <ul className="list-inside list-disc text-gray-600">
+                          {agentRun.plan.steps.map((s, i) => (
+                            <li key={i}>{s}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    {agentRun.research && (
+                      <div>
+                        <p className="font-medium">{t("orchestration.research")}</p>
+                        <p className="whitespace-pre-wrap text-gray-600">
+                          {agentRun.research.findings}
+                        </p>
+                      </div>
+                    )}
+                    {agentRun.draftOutput && (
+                      <div>
+                        <p className="font-medium">{t("orchestration.draft")}</p>
+                        <pre className="whitespace-pre-wrap rounded-lg bg-gray-50 p-2 text-gray-600">
+                          {JSON.stringify(agentRun.draftOutput.output, null, 2)}
+                        </pre>
+                        {agentRun.draftOutput.notes && (
+                          <p className="mt-1 text-gray-500">{agentRun.draftOutput.notes}</p>
+                        )}
+                        <button
+                          onClick={onUseDraft}
+                          className="mt-2 rounded-lg border border-gray-300 px-3 py-1.5 text-sm"
+                        >
+                          {t("orchestration.useDraft")}
+                        </button>
+                      </div>
+                    )}
+                    {agentRun.qaPassed !== null && (
+                      <div>
+                        <p className="font-medium">{t("orchestration.qa")}</p>
+                        <span
+                          className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                            agentRun.qaPassed
+                              ? "bg-green-100 text-green-700"
+                              : "bg-orange-100 text-orange-700"
+                          }`}
+                        >
+                          {agentRun.qaPassed ? t("orchestration.qaPassed") : t("orchestration.qaFailed")}
+                        </span>
+                        {agentRun.qaNotes && <p className="mt-1 text-gray-500">{agentRun.qaNotes}</p>}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </Section>
+          )}
 
         {/* Operator workspace — Assigned / RevisionRequested / InProgress */}
         {isOperator &&

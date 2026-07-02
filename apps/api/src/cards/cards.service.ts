@@ -8,6 +8,7 @@ import {
   type CreateCardInput,
   type UpdateCardInput,
   type UpdateCardVisibilityInput,
+  type UpdateCardOrchestrationInput,
 } from "@taskora/shared";
 import { PrismaService } from "../prisma/prisma.service";
 import { EventsService } from "../events/events.service";
@@ -40,6 +41,7 @@ function toView(card: Card): CardView {
     visibility: card.visibility as CardView["visibility"],
     requiredOperatorLevel: card.requiredOperatorLevel as CardView["requiredOperatorLevel"],
     qualificationTestId: card.qualificationTestId,
+    orchestrationEnabled: card.orchestrationEnabled,
   };
 }
 
@@ -55,6 +57,7 @@ function toListItem(card: Card): CardListItem {
     visibility: card.visibility as CardListItem["visibility"],
     requiredOperatorLevel: card.requiredOperatorLevel as CardListItem["requiredOperatorLevel"],
     qualificationTestId: card.qualificationTestId,
+    orchestrationEnabled: card.orchestrationEnabled,
   };
 }
 
@@ -226,6 +229,39 @@ export class CardsService {
       entityId: cardId,
       before: { visibility: existing.visibility },
       after: { visibility: card.visibility },
+    });
+
+    return toView(card);
+  }
+
+  /**
+   * تفعيل/إيقاف أوركسترا الوكلاء (المرحلة 10) للكارت — اختياري، الأدمن بس بيفعّله.
+   * الأوركسترا ما بتشتغلش لأي كارت غير لو اتفعّلت صراحةً هنا.
+   */
+  async updateOrchestration(
+    organizationId: string,
+    cardId: string,
+    actorId: string,
+    input: UpdateCardOrchestrationInput,
+  ): Promise<CardView> {
+    const existing = await this.prisma.card.findFirst({
+      where: { id: cardId, organizationId },
+    });
+    if (!existing) throw new NotFoundException("الكارت ده مش موجود");
+
+    const card = await this.prisma.card.update({
+      where: { id: cardId },
+      data: { orchestrationEnabled: input.enabled },
+    });
+
+    await this.audit.record({
+      organizationId,
+      actorId,
+      action: "card.orchestration_updated",
+      entityType: "Card",
+      entityId: cardId,
+      before: { orchestrationEnabled: existing.orchestrationEnabled },
+      after: { orchestrationEnabled: card.orchestrationEnabled },
     });
 
     return toView(card);

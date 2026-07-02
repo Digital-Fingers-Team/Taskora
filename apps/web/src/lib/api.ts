@@ -48,6 +48,8 @@ import type {
   QualificationTestForAttempt,
   SubmitQualificationAttemptInput,
   QualificationAttemptResult,
+  AgentRunView,
+  UpdateCardOrchestrationInput,
 } from "@taskora/shared";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
@@ -360,4 +362,19 @@ export const api = {
 
   listMyQualificationAttempts: (orgId: string) =>
     request<QualificationAttemptResult[]>(`/organizations/${orgId}/qualification-tests/my-attempts`),
+
+  // --- Phase 10 (تعدّد الوكلاء) ---
+  updateCardOrchestration: (orgId: string, cardId: string, enabled: boolean) =>
+    request<CardView>(`/organizations/${orgId}/cards/${cardId}/orchestration`, {
+      method: "PATCH",
+      body: JSON.stringify({ enabled } satisfies UpdateCardOrchestrationInput),
+    }),
+
+  runAgentOrchestration: (orgId: string, taskId: string) =>
+    request<AgentRunView>(`/organizations/${orgId}/tasks/${taskId}/agent-run`, {
+      method: "POST",
+    }),
+
+  getAgentRun: (orgId: string, taskId: string) =>
+    request<AgentRunView | null>(`/organizations/${orgId}/tasks/${taskId}/agent-run`),
 };
